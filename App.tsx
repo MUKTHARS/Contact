@@ -25,7 +25,7 @@ import React from 'react';
    subtitle: {
      fontSize: 16,
      color: '#666',
-     marginTop: 10,
+     marginTop: 9,
    },
  });
 
