@@ -116,14 +116,25 @@ const App = () => {
     
     switch(name) {
       case 'search':
-        iconSymbol = '🔍';
+        iconSymbol = '';
         break;
       case 'arrow-back':
-        iconSymbol = '←';
+        iconSymbol = ' く';
         break;
-      case 'information-circle-outline':
-        iconSymbol = 'ℹ️';
-        break;
+        case 'information-circle-outline':
+          iconSymbol = 'ⓘ';
+          return (
+            <Text style={{ 
+              fontSize: size * 0.9, 
+              color: color, 
+              lineHeight: size, 
+              marginRight: 5,
+              fontWeight: 'bold' 
+            }}>
+              {iconSymbol}
+            </Text>
+          );
+          break;
       case 'call':
         iconSymbol = '📞';
         break;
@@ -215,6 +226,7 @@ const App = () => {
             style={styles.infoButton}
             onPress={() => viewStudentDetails(student)}
           >
+            
             <Icon name="information-circle-outline" size={22} color={theme.accentColor} />
           </TouchableOpacity>
         </TouchableOpacity>
