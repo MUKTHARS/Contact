@@ -1,5 +1,5 @@
 {
-  "name": "Contact",
+  "name": "contact",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -12,6 +12,10 @@
   "dependencies": {
     "@react-navigation/native": "^7.1.5",
     "@react-navigation/stack": "^7.2.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "mysql2": "^3.14.0",
     "react": "19.0.0",
     "react-native": "0.78.2",
     "react-native-gesture-handler": "^2.25.0",
@@ -44,5 +48,18 @@
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "description": "This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MUKTHARS/Contact.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MUKTHARS/Contact/issues"
+  },
+  "homepage": "https://github.com/MUKTHARS/Contact#readme"
 }

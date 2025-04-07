@@ -12,41 +12,65 @@ import {
   Platform,
   Animated,
   Dimensions,
-  Image
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
+// Improved API configuration with platform-specific URLs
+const getApiUrl = () => {
+  if (Platform.OS === 'android') {
+    // For Android Emulator
+    return 'http://10.0.2.2:5000/api';
+  } else if (Platform.OS === 'ios') {
+    // For iOS Simulator
+    return 'http://localhost:5000/api';
+  } else {
+    // For physical devices, use your computer's local network IP address
+    // Replace 192.168.1.X with your actual IP address
+    return 'http://192.168.1.X:5000/api';
+  }
+};
+
+const API_BASE_URL = getApiUrl();
+
+// Fetch with timeout utility function
+const fetchWithTimeout = async (url, options = {}, timeout = 10000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+
 const App = () => {
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(width));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Mock data - replace with your DB connection
+  // Fetch students from API
   useEffect(() => {
-    // This would be your API call in a real app
-    const mockStudents = [
-      { id: '1', name: 'Adam Johnson', rollNumber: 'CS2201', department: 'Computer Science', email: 'adam.j@example.edu', accommodation: 'Hosteller', address: '123 College Dorm, Room 302', labName: 'AI Research Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '2', name: 'Beth Williams', rollNumber: 'CS2202', department: 'Computer Science', email: 'beth.w@example.edu', accommodation: 'Day Scholar', address: '456 University Avenue', labName: 'Network Security Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '3', name: 'Carlos Rodriguez', rollNumber: 'EE2203', department: 'Electrical Engineering', email: 'carlos.r@example.edu', accommodation: 'Hosteller', address: '123 College Dorm, Room 205', labName: 'Power Systems Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '4', name: 'Diana Chen', rollNumber: 'ME2204', department: 'Mechanical Engineering', email: 'diana.c@example.edu', accommodation: 'Day Scholar', address: '789 Engineering Blvd', labName: 'Robotics Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '5', name: 'Eli Thompson', rollNumber: 'CS2205', department: 'Computer Science', email: 'eli.t@example.edu', accommodation: 'Hosteller', address: '123 College Dorm, Room 410', labName: 'Data Science Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '6', name: 'Fatima Ahmed', rollNumber: 'CE2206', department: 'Civil Engineering', email: 'fatima.a@example.edu', accommodation: 'Day Scholar', address: '101 Structure Street', labName: 'Urban Planning Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '7', name: 'George Patel', rollNumber: 'BT2207', department: 'Biotechnology', email: 'george.p@example.edu', accommodation: 'Hosteller', address: '123 College Dorm, Room 115', labName: 'Genetics Lab', photo: 'https://via.placeholder.com/150' },
-      { id: '8', name: 'Hannah Kim', rollNumber: 'CS2208', department: 'Computer Science', email: 'hannah.k@example.edu', accommodation: 'Day Scholar', address: '202 Programming Path', labName: 'Mobile Computing Lab', photo: 'https://via.placeholder.com/150' },
-    ];
-    
-    // Sort alphabetically by name
-    const sortedStudents = mockStudents.sort((a, b) => a.name.localeCompare(b.name));
-    setStudents(sortedStudents);
-    setFilteredStudents(sortedStudents);
-    
+    fetchStudents();
+
     // Fade in animation
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -55,10 +79,98 @@ const App = () => {
     }).start();
   }, []);
 
+  // Improved function to fetch students from API with retry logic
+  const fetchStudents = async (retryCount = 0) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log('Fetching from:', `${API_BASE_URL}/students`);
+
+      const response = await fetchWithTimeout(`${API_BASE_URL}/students`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Response status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Response data received:', !!result);
+
+      if (result.status === 'success') {
+        const sortedStudents = result.data.sort((a, b) => a.name.localeCompare(b.name));
+        setStudents(sortedStudents);
+        setFilteredStudents(sortedStudents);
+      } else {
+        setError('Failed to load students: ' + (result.message || 'Unknown error'));
+        Alert.alert('Error', 'Failed to load student data: ' + (result.message || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('API Error:', error.message);
+
+      if (error.name === 'AbortError') {
+        setError('Request timed out. Server might be slow or unreachable.');
+        Alert.alert('Timeout', 'Request timed out. Please check your server is running correctly.');
+      } else if (retryCount < 2) {
+        // Retry up to 2 times with exponential backoff
+        console.log(`Retrying... Attempt ${retryCount + 1}`);
+        setTimeout(() => {
+          fetchStudents(retryCount + 1);
+        }, 1000 * Math.pow(2, retryCount)); // 1s, 2s, 4s backoff
+        return;
+      } else {
+        setError(`Network error: ${error.message}. Check server connection and API URL.`);
+        Alert.alert(
+          'Network Error',
+          `Failed to connect to the server. Please verify:
+
+1. Node.js server is running on port 5000
+2. Database connection is working
+3. API URL is correct (${API_BASE_URL})
+4. No firewall blocking connections`,
+          [{ text: 'OK' }]
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch a single student by ID (with improved error handling)
+  const fetchStudentById = async (id) => {
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/students/${id}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.status === 'success') {
+        return result.data;
+      } else {
+        Alert.alert('Error', 'Failed to load student details');
+        return null;
+      }
+    } catch (error) {
+      console.error('API Error:', error);
+      Alert.alert('Network Error', 'Failed to connect to the server');
+      return null;
+    }
+  };
+
   // Search functionality
   const handleSearch = (text) => {
     setSearchQuery(text);
-    const filtered = students.filter(student => 
+    const filtered = students.filter(student =>
       student.name.toLowerCase().includes(text.toLowerCase()) ||
       student.rollNumber.toLowerCase().includes(text.toLowerCase())
     );
@@ -66,8 +178,9 @@ const App = () => {
   };
 
   // Toggle to student details view with animation
-  const viewStudentDetails = (student) => {
+  const viewStudentDetails = async (student) => {
     setSelectedStudent(student);
+
     // Reset and trigger slide-in animation
     slideAnim.setValue(width);
     Animated.timing(slideAnim, {
@@ -101,8 +214,8 @@ const App = () => {
     accentGradientStart: isDarkMode ? '#5d8ef7' : '#4285f4',
     accentGradientEnd: isDarkMode ? '#3874dd' : '#2c65d1',
     shadowColor: isDarkMode ? '#000000' : '#aaaaaa',
-    cardShadow: isDarkMode ? 
-      'rgba(0, 0, 0, 0.3)' : 
+    cardShadow: isDarkMode ?
+      'rgba(0, 0, 0, 0.3)' :
       'rgba(0, 0, 0, 0.1)',
     statusTagBackground: isDarkMode ? '#383838' : '#f0f0f0',
     statusTagText: isDarkMode ? '#ffffff' : '#333333',
@@ -113,7 +226,7 @@ const App = () => {
   const Icon = ({ name, size, color }) => {
     // Map icon name to a simple text representation
     let iconSymbol;
-    
+
     switch(name) {
       case 'search':
         iconSymbol = '';
@@ -124,12 +237,12 @@ const App = () => {
         case 'information-circle-outline':
           iconSymbol = 'ⓘ';
           return (
-            <Text style={{ 
-              fontSize: size * 0.9, 
-              color: color, 
-              lineHeight: size, 
+            <Text style={{
+              fontSize: size * 0.9,
+              color: color,
+              lineHeight: size,
               marginRight: 5,
-              fontWeight: 'bold' 
+              fontWeight: 'bold'
             }}>
               {iconSymbol}
             </Text>
@@ -153,10 +266,13 @@ const App = () => {
       case 'flask':
         iconSymbol = '🧪';
         break;
+      case 'refresh':
+        iconSymbol = '⟳';
+        break;
       default:
         iconSymbol = '•';
     }
-    
+
     return (
       <Text style={{ fontSize: size * 0.9, color: color, lineHeight: size, marginRight: 5 }}>
         {iconSymbol}
@@ -171,6 +287,13 @@ const App = () => {
       <View style={styles.headerBadge}>
         <Text style={styles.headerBadgeText}>{students.length}</Text>
       </View>
+      <TouchableOpacity
+        style={styles.refreshButton}
+        onPress={() => fetchStudents()}
+        disabled={loading}
+      >
+        <Icon name="refresh" size={42} color={loading ? theme.subtitleColor : theme.accentColor} />
+      </TouchableOpacity>
     </View>
   );
 
@@ -178,7 +301,7 @@ const App = () => {
   const StudentListItem = ({ student, index }) => {
     // Create staggered animation for list items
     const itemFadeAnim = React.useRef(new Animated.Value(0)).current;
-    
+
     React.useEffect(() => {
       Animated.timing(itemFadeAnim, {
         toValue: 1,
@@ -187,22 +310,22 @@ const App = () => {
         useNativeDriver: true,
       }).start();
     }, []);
-    
-    // Department abbreviation 
-    const deptInitial = student.department.split(' ')[0][0] + 
+
+    // Department abbreviation
+    const deptInitial = student.department.split(' ')[0][0] +
                         (student.department.split(' ')[1] ? student.department.split(' ')[1][0] : '');
-    
+
     return (
       <Animated.View style={{ opacity: itemFadeAnim, transform: [{ translateY: itemFadeAnim.interpolate({
         inputRange: [0, 1],
         outputRange: [20, 0]
       })}]}}>
-        <TouchableOpacity 
-          style={[styles.studentCard, { 
+        <TouchableOpacity
+          style={[styles.studentCard, {
             backgroundColor: theme.cardBackground,
             borderColor: theme.borderColor,
             shadowColor: theme.cardShadow,
-          }]} 
+          }]}
           onPress={() => viewStudentDetails(student)}
           activeOpacity={0.7}
         >
@@ -211,7 +334,7 @@ const App = () => {
               <Text style={styles.avatarText}>{student.name[0]}</Text>
             </View>
           </View>
-          
+
           <View style={styles.studentInfo}>
             <Text style={[styles.studentName, { color: theme.textColor }]}>{student.name}</Text>
             <View style={styles.badgeRow}>
@@ -221,12 +344,12 @@ const App = () => {
               </View>
             </View>
           </View>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.infoButton}
             onPress={() => viewStudentDetails(student)}
           >
-            
+
             <Icon name="information-circle-outline" size={22} color={theme.accentColor} />
           </TouchableOpacity>
         </TouchableOpacity>
@@ -237,20 +360,20 @@ const App = () => {
   // Student Detail View Component with enhanced design
   const StudentDetailView = ({ student }) => {
     const accommodationColor = student.accommodation === 'Hosteller' ? '#ff9500' : '#34c759';
-    
+
     return (
-      <Animated.View 
+      <Animated.View
         style={[
-          styles.detailContainer, 
-          { 
+          styles.detailContainer,
+          {
             backgroundColor: theme.backgroundColor,
-            transform: [{ translateX: slideAnim }] 
+            transform: [{ translateX: slideAnim }]
           }
         ]}
       >
         <View style={[styles.profileHeader, { backgroundColor: theme.headerBg }]}>
-          <TouchableOpacity 
-            style={styles.backButton} 
+          <TouchableOpacity
+            style={styles.backButton}
             onPress={goBackToList}
             activeOpacity={0.7}
           >
@@ -258,7 +381,7 @@ const App = () => {
           </TouchableOpacity>
           <Text style={[styles.profileTitle, { color: theme.textColor }]}>Student Profile</Text>
         </View>
-        
+
         <View style={styles.profileScrollView}>
           <View style={[styles.profileHero, { backgroundColor: theme.cardBackground }]}>
             <View style={styles.photoContainer}>
@@ -273,10 +396,10 @@ const App = () => {
               </View>
             </View>
           </View>
-          
+
           <View style={[styles.detailSection, { backgroundColor: theme.cardBackground }]}>
             <Text style={[styles.sectionTitle, { color: theme.textColor }]}>Student Information</Text>
-            
+
             <View style={styles.detailRow}>
               <Icon name="school" size={20} color={theme.accentColor} />
               <View style={styles.detailContent}>
@@ -284,9 +407,9 @@ const App = () => {
                 <Text style={[styles.detailValue, { color: theme.textColor }]}>{student.rollNumber}</Text>
               </View>
             </View>
-            
+
             <View style={styles.detailDivider} />
-            
+
             <View style={styles.detailRow}>
               <Icon name="school" size={20} color={theme.accentColor} />
               <View style={styles.detailContent}>
@@ -294,9 +417,9 @@ const App = () => {
                 <Text style={[styles.detailValue, { color: theme.textColor }]}>{student.department}</Text>
               </View>
             </View>
-            
+
             <View style={styles.detailDivider} />
-            
+
             <View style={styles.detailRow}>
               <Icon name="flask" size={20} color={theme.accentColor} />
               <View style={styles.detailContent}>
@@ -305,10 +428,10 @@ const App = () => {
               </View>
             </View>
           </View>
-          
+
           <View style={[styles.detailSection, { backgroundColor: theme.cardBackground }]}>
             <Text style={[styles.sectionTitle, { color: theme.textColor }]}>Contact Information</Text>
-            
+
             <View style={styles.detailRow}>
               <Icon name="mail" size={20} color={theme.accentColor} />
               <View style={styles.detailContent}>
@@ -316,9 +439,9 @@ const App = () => {
                 <Text style={[styles.detailValue, { color: theme.textColor }]}>{student.email}</Text>
               </View>
             </View>
-            
+
             <View style={styles.detailDivider} />
-            
+
             <View style={styles.detailRow}>
               <Icon name="home" size={20} color={theme.accentColor} />
               <View style={styles.detailContent}>
@@ -327,7 +450,7 @@ const App = () => {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: theme.subtitleColor }]}>
               Student ID: {student.id}
@@ -338,26 +461,55 @@ const App = () => {
     );
   };
 
+  // Enhanced Loading indicator component
+  const LoadingView = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={theme.accentColor} />
+      <Text style={[styles.loadingText, { color: theme.textColor }]}>Loading students...</Text>
+    </View>
+  );
+
+  // Enhanced Error component with more details
+  const ErrorView = () => (
+    <View style={styles.errorContainer}>
+      <Text style={[styles.errorTitle, { color: theme.textColor }]}>Connection Error</Text>
+      <Text style={[styles.errorText, { color: theme.subtitleColor }]}>{error}</Text>
+      <View style={styles.errorTips}>
+        <Text style={[styles.errorTipTitle, { color: theme.textColor }]}>Troubleshooting tips:</Text>
+        <Text style={[styles.errorTip, { color: theme.subtitleColor }]}>• Check if Node.js server is running on port 5000</Text>
+        <Text style={[styles.errorTip, { color: theme.subtitleColor }]}>• Verify XAMPP Apache and MySQL are running</Text>
+        <Text style={[styles.errorTip, { color: theme.subtitleColor }]}>• Check database connection settings</Text>
+        <Text style={[styles.errorTip, { color: theme.subtitleColor }]}>• Ensure the API URL is correct: {API_BASE_URL}</Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.retryButton, { backgroundColor: theme.accentColor }]}
+        onPress={() => fetchStudents()}
+      >
+        <Text style={styles.retryButtonText}>Retry Connection</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.backgroundColor }]}>
       <StatusBar
         barStyle={isDarkMode ? 'light-content' : 'dark-content'}
         backgroundColor={theme.backgroundColor}
       />
-      
+
       {!selectedStudent ? (
         // Student List View
-        <Animated.View 
+        <Animated.View
           style={[
-            styles.container, 
-            { 
+            styles.container,
+            {
               backgroundColor: theme.backgroundColor,
-              opacity: fadeAnim 
+              opacity: fadeAnim
             }
           ]}
         >
           <Header />
-          
+
           <View style={[styles.searchBarContainer, { backgroundColor: theme.searchBarBackground }]}>
             <Icon name="search" size={20} color={theme.subtitleColor} style={styles.searchIcon} />
             <TextInput
@@ -373,11 +525,15 @@ const App = () => {
               </TouchableOpacity>
             )}
           </View>
-          
-          {filteredStudents.length > 0 ? (
+
+          {loading ? (
+            <LoadingView />
+          ) : error ? (
+            <ErrorView />
+          ) : filteredStudents.length > 0 ? (
             <FlatList
               data={filteredStudents}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => item.id.toString()}
               renderItem={({ item, index }) => <StudentListItem student={item} index={index} />}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
@@ -429,6 +585,10 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     fontSize: 12,
+  },
+  refreshButton: {
+    padding: 8,
+    marginLeft: 10,
   },
   searchBarContainer: {
     flexDirection: 'row',
@@ -648,12 +808,61 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
+    padding: 20,
   },
   emptyStateText: {
     fontSize: 16,
     textAlign: 'center',
-    lineHeight: 24,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  errorTips: {
+    alignSelf: 'stretch',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  errorTipTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  errorTip: {
+    fontSize: 14,
+    marginBottom: 6,
+  },
+  retryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 
